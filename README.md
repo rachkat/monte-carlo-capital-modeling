@@ -59,7 +59,7 @@ Set a seed when reporting numeric results.
 
 ---
 
-## ▶️ Reproducible R Snippet — **Compound Poisson (recommended)**
+## Reproducible R Snippet — **Compound Poisson**
 ```r
 # --- CONFIG ---
 set.seed(610)  # reproducibility
