@@ -1,63 +1,90 @@
 # Monte Carlo Simulation for Capital Modeling
 
+![Method: Monte Carlo](https://img.shields.io/badge/Method-Monte%20Carlo-blue)
+![Model: Poisson×Lognormal](https://img.shields.io/badge/Model-Poisson%C3%97Lognormal-purple)
+![Language: R](https://img.shields.io/badge/Language-R-276DC3)
+![License: MIT](https://img.shields.io/badge/License-MIT-green)
+
 **Author:** Rachel Goldsbury  
-**Course:** SNHU DAT 610 · **Instructor:** Kyle Camac  
+**Course:** SNHU DAT 610 Optimization & Risk Assessment · **Instructor:** Kyle Camac  
 **Date:** September 22, 2024
 
 ---
 
-## 📄 Quick Links
+## Quick Links
 - **Full paper (PDF):** [monte_carlo_capital_modeling.pdf](./monte_carlo_capital_modeling.pdf)
 
 ---
 
-## 🧭 Executive Summary
-This project estimates **maximum annual collision loss** using a **Monte Carlo simulation** that combines:
-- **Frequency** ~ Poisson(λ) for number of loss events per year
-- **Severity** ~ Lognormal(μ, σ) for loss size per event
+## Executive Summary
+This project estimates **annual collision loss** via **Monte Carlo simulation** with:
+- **Event Frequency** ~ Poisson(λ)  
+- **Loss Severity** ~ Lognormal(μ, σ)
 
-We simulate many years, compute **annual total loss = frequency × severity**, and read off an extreme quantile (e.g., **99.9%**) as a **capital requirement proxy**. The paper shows a worked example using IIHS data and reports an illustrative **99.9% annual loss ~ 3963.137** (from the exercise’s inputs and draws).
+For each simulated year we draw the number of events and **sum the per-event severities** (compound Poisson). The **99.9th percentile** of simulated annual losses is used as a **capital proxy**. A classroom shortcut (frequency × one severity draw) is also shown for comparison.
 
 ---
 
-## 🔬 Method (at a glance)
-1. **Data prep (R):** load CSV → remove NAs → inspect.  
-2. **Frequency (Poisson):** `λ = mean(events per year)` (e.g., `mean(table(df$YEAR))`).  
-3. **Severity (Lognormal):** derive `μ, σ` from sample mean `m` and sd `s`:
+## Method Overview
+1. **Data prep (R):** Load IIHS data, drop NAs, inspect.  
+2. **Frequency (Poisson):** λ = average number of events per year (`mean(table(df$YEAR))`).  
+3. **Severity (Lognormal):** From sample mean `m` and sd `s`, derive:
    - `sigma = sqrt(log(1 + (s^2 / m^2)))`  
-   - `mu = log(m / sqrt(1 + (s^2 / m^2)))`
-4. **Monte Carlo:** repeat N times (e.g., **1000+**):
-   - draw `N_events ~ Poisson(λ)`
-   - draw `severity ~ Lognormal(μ, σ)` (per-event or average, depending on design)
-   - compute **annual total** (e.g., `N_events * severity` for a simple model)
-5. **Capital estimate:** take the **99.9th percentile** (or sort and pick top).
+   - `mu    = log(m / sqrt(1 + (s^2 / m^2)))`
+4. **Monte Carlo (N ≥ 10,000):**
+   - Draw `N_events ~ Poisson(λ)`  
+   - Draw `N_events` severities from Lognormal(μ, σ) and **sum** them  
+5. **Capital estimate:** `quantile(annual_loss, 0.999)`
+
+# Capital proxy at 99.9%
+cap_99_9 <- unname(quantile(annual_loss, probs = 0.999))
+cap_99_9
+Why this matters: In a compound Poisson model, annual loss is the sum of severities across all events in a year. Multiplying event count by a single severity draw can understate tail risk (e.g., the 99.9% quantile).
 
 ---
 
-## ▶️ Reproducible R Snippet
+Files
+monte_carlo_capital_modeling.pdf — full write-up (methods, results, references)
+
+---
+
+# Notes & Pitfalls
+Match the severity column name (severity_col) to your dataset and ensure it is per-event loss.
+
+Use larger N (e.g., 50k–100k) for more stable extreme quantiles.
+
+Keep filenames lowercase_with_underscores to avoid broken README links.
+
+Set a seed when reporting numeric results.
+
+---
+
+## ▶️ Reproducible R Snippet — **Compound Poisson (recommended)**
 ```r
 # --- CONFIG ---
-set.seed(610)  # for reproducibility
-path <- "iihs_data_for_EX_8.csv"  # replace with your file path
+set.seed(610)  # reproducibility
+path <- "iihs_data_for_EX_8.csv"   # <-- replace with your path
+severity_col <- "Collision."       # <-- replace if your column differs
+N <- 10000                         # simulated years
 
-# --- LOAD ---
-df <- read.csv(path)
-df <- na.omit(df)
-rownames(df) <- NULL
+# --- LOAD & CLEAN ---
+df <- read.csv(path, check.names = FALSE)
+df <- na.omit(df); rownames(df) <- NULL
 
-# --- FREQUENCY (Poisson) ---
-yearMean <- mean(table(df$YEAR))  # λ
+# --- FREQUENCY: estimate lambda from events per year ---
+lambda <- mean(table(df$YEAR))
 
-# --- SEVERITY (Lognormal) ---
-m <- mean(df$Collision.)     # replace with your severity column
-s <- sd(df$Collision.)
+# --- SEVERITY: derive lognormal parameters from sample mean/sd ---
+m <- mean(df[[severity_col]])
+s <- sd(df[[severity_col]])
 sigma <- sqrt(log(1 + (s^2 / m^2)))
-mu <- log(m / sqrt(1 + (s^2 / m^2)))
+mu    <- log(m / sqrt(1 + (s^2 / m^2)))
 
-# --- MONTE CARLO ---
-N <- 10000
-annual_loss <- replicate(N, rpois(1, yearMean) * rlnorm(1, mu, sigma))
+# --- MONTE CARLO (compound Poisson) ---
+n_events <- rpois(N, lambda)
 
-# 99.9% capital estimate
-cap_99_9 <- quantile(annual_loss, probs = 0.999, names = FALSE)
-cap_99_9
+annual_loss <- sapply(n_events, function(k) {
+  if (k == 0) 0 else sum(rlnorm(k, meanlog = mu, sdlog = sigma))
+})```
+
+---
